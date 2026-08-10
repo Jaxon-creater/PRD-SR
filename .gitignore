@@ -1,0 +1,73 @@
+# Python bytecode and test/tool caches
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Virtual environments and local environment/secrets
+.venv/
+venv/
+env/
+.env
+.env.*
+!.env.example
+
+# Editors and operating-system metadata
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Raw and generated datasets: publish download instructions and hashes instead
+data/
+datasets/*
+!datasets/*.py
+**/raw/
+**/processed/
+**/downloads/
+*.bak
+review_texts*.csv
+*_review.csv
+*_user.csv
+*.jsonl
+yelp_academic_dataset_*.json
+reviews_*.json
+review_*.json
+meta_*.json
+epinions.txt
+network_trust.txt
+network_trustedby.txt
+
+# Model weights, semantic caches, and downloaded pretrained models
+Model/
+models/all-MiniLM-L6-v2/
+cache/
+checkpoints/
+*.pt
+*.pth
+*.ckpt
+*.safetensors
+*.bin
+
+# Experiment outputs and logs
+results/
+logs/
+figures/
+runs/
+wandb/
+*.log
+*.out
+test_noise_distribution.png
+
+# Archives and temporary download fragments
+*.zip
+*.tar
+*.tar.gz
+*.tgz
+*.gz
+*.7z
+*.part
