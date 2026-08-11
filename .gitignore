@@ -24,14 +24,12 @@ env/
 
 # Raw and generated datasets: publish download instructions and hashes instead
 data/
-datasets/*
+# datasets/*
 !datasets/*.py
 **/raw/
 **/processed/
 **/downloads/
 *.bak
-review_texts*.csv
-*_review.csv
 *_user.csv
 *.jsonl
 yelp_academic_dataset_*.json

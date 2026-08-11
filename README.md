@@ -23,7 +23,7 @@ python -m pip install -r requirements.txt
 
 ### 🔥Raw data sources
 
-The experiments use processed datasets derived from publicly available raw data. The raw files are not used directly by the model: every experimental dataset is produced by applying the preprocessing procedure described below.
+The experiments use processed datasets derived from publicly available raw data. The raw files are not used directly by the model: every experimental dataset is produced by applying the preprocessing procedure.
 
 - **Yelp.** The raw Yelp Open Dataset is available from the[Yelp Open Dataset portal](https://business.yelp.com/data/resources/open-dataset/).The preprocessing pipeline uses the review, user, and business JSON files.
 - **Amazon.** The Amazon experimental data are derived from the public[Amazon Reviews 2024 collection](https://cseweb.ucsd.edu/~jmcauley/datasets/amazon/links.html).
@@ -32,29 +32,29 @@ Users must obtain the raw files from the corresponding providers and comply with
 
 ### ☀️Reproducibility scope
 
-The anonymous artifact currently provides **Yelp only** as the representative end-to-end reproducibility dataset. Yelp covers the interaction graph, observed friendship graph, business metadata, and review-text inputs required by the model. The remaining experimental datasets are processed from their respective raw sources using the same general protocol, but they are not included in the current reproducibility package.
+The anonymous artifact currently provides **Amazon-beauty only** as the representative end-to-end reproducibility dataset. Amazon-beauty covers the interaction graph, observed friendship graph, business metadata, and review-text inputs required by the model. The remaining experimental datasets are processed from their respective raw sources using the same general protocol, but they are not included in the current reproducibility package.
 
 The Dataset includes:
 
 ```text
-datasets/yelp/dataset.pkl
-datasets/yelp/review_texts.csv
+datasets/amazon-beauty/dataset.pkl
+datasets/amazon-beauty/review_texts.csv
 ```
 
 ## 🚀Model Training
 
-### 🔥Train on Yelp
+### 🔥Train on Dataset
 
-All Yelp reproduction hyperparameters are stored as defaults in
+All Amazon-beauty reproduction hyperparameters are stored as defaults in
 [`utils/param.py`](utils/param.py). After preparing and validating the dataset,
 the complete training run is therefore launched with the concise command:
 
 ```bash
-python main.py --dataset yelp
+python main.py --dataset amazon-beauty
 ```
 
 Any value can still be overridden explicitly from the command line. For example:
 
 ```bash
-python main.py --dataset yelp --cuda 0
+python main.py --dataset amazon-beauty --cuda 0
 ```

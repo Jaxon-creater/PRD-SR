@@ -12,8 +12,8 @@ def parse_args():
 
    #Model Arguments
     parser.add_argument('--n_hid',     type=int,   default=64)
-    parser.add_argument('--n_layers',  type=int,   default=3)
-    parser.add_argument('--s_layers', type=int, default=3)
+    parser.add_argument('--n_layers',  type=int,   default=2)
+    parser.add_argument('--s_layers', type=int, default=2)
     parser.add_argument('--weight', type=bool, default=True, help='Add linear weight or not')
 
 
@@ -28,30 +28,30 @@ def parse_args():
     parser.add_argument('--decay',      type=float, default=0.985)
     parser.add_argument('--decay_step', type=int,   default=1)
     parser.add_argument('--n_epoch',    type=int,   default=175)
-    parser.add_argument('--batch_size', type=int,   default=4096)
+    parser.add_argument('--batch_size', type=int,   default=2048)
     parser.add_argument('--patience',   type=int,   default=20)
 
     # Valid/Test Arguments 
     parser.add_argument('--topk',            type=int, default=20)
-    parser.add_argument('--test_batch_size', type=int, default=2048)
+    parser.add_argument('--test_batch_size', type=int, default=1024)
 
     #Data Arguments
-    parser.add_argument('--dataset',       type=str, default="yelp")
+    parser.add_argument('--dataset',       type=str, default="amazon-beauty")
     parser.add_argument('--num_workers',   type=int, default=0)
     parser.add_argument('--save_name', type=str, default='tem')
-    parser.add_argument('--checkpoint',    type=str, default="./Model/yelp/_tem_.pth")
-    parser.add_argument('--model_dir',     type=str, default="./Model/yelp/")
+    parser.add_argument('--checkpoint',    type=str, default="./Model/amazon-beauty/_tem_.pth")
+    parser.add_argument('--model_dir',     type=str, default="./Model/amazon-beauty/")
    
     # params for the denoiser
     parser.add_argument('--time_type', type=str, default='cat', help='cat or add')
     parser.add_argument('--dims', type=int, default=64, help='the dims for the DNN')
     parser.add_argument('--norm', type=bool, default=True, help='Normalize the input or not')
-    parser.add_argument('--emb_size', type=int, default=16, help='timestep embedding size')
+    parser.add_argument('--emb_size', type=int, default=8, help='timestep embedding size')
 
     # params for diffusions
-    parser.add_argument('--steps', type=int, default=50, help='diffusion steps')
+    parser.add_argument('--steps', type=int, default=20, help='diffusion steps')
     parser.add_argument('--noise_schedule', type=str, default='linear-var', help='the schedule for noise generating')
-    parser.add_argument('--noise_scale', type=float, default=1, help='noise scale for noise generating')
+    parser.add_argument('--noise_scale', type=float, default=0.01, help='noise scale for noise generating')
     parser.add_argument('--noise_min', type=float, default=0.0001, help='noise lower bound for noise generating')
     parser.add_argument('--noise_max', type=float, default=0.01, help='noise upper bound for noise generating')
     parser.add_argument('--sampling_noise', type=bool, default=False, help='sampling with noise or not')
@@ -72,7 +72,7 @@ def parse_args():
     # params for semantic features
     parser.add_argument('--semantic_dim', type=int, default=384,
                         help='dimension of semantic features from all-MiniLM-L6-v2')
-    parser.add_argument('--review_text_path', type=str, default='datasets/yelp/review_texts.csv',
+    parser.add_argument('--review_text_path', type=str, default='datasets/amazon/review_texts.csv',
                         help='path to review texts CSV file')
     parser.add_argument('--use_semantic', type=bool, default=True,
                         help='whether to use semantic features')
@@ -81,9 +81,9 @@ def parse_args():
     parser.add_argument('--semantic_fusion_mode', type=str, default='residual',
                         choices=['residual', 'multimodal'],
                         help='how to fuse semantic features: residual preserves RDGC as the main representation')
-    parser.add_argument('--user_semantic_residual_weight', type=float, default=1.0,
+    parser.add_argument('--user_semantic_residual_weight', type=float, default=0.5,
                         help='residual weight for adding projected user text features to RDGC user embeddings')
-    parser.add_argument('--item_semantic_residual_weight', type=float, default=1.0,
+    parser.add_argument('--item_semantic_residual_weight', type=float, default=0.5,
                         help='residual weight for adding projected item text features to item embeddings')
 
     # params for dual-graph collaboration
@@ -99,9 +99,9 @@ def parse_args():
                         help='softmax temperature for RDGC reliability gates')
     parser.add_argument('--rdgc_residual_weight', type=float, default=0.2,
                         help='weight for preserving original graph representations in RDGC')
-    parser.add_argument('--rdgc_cross_weight', type=float, default=0,
+    parser.add_argument('--rdgc_cross_weight', type=float, default=0.3,
                         help='strength of cross-view representation in RDGC')
-    parser.add_argument('--rdgc_use_cross_view', type=bool, default=False,
+    parser.add_argument('--rdgc_use_cross_view', type=bool, default=True,
                         help='whether to use cross-view representation in RDGC')
 
     # params for multimodal fusion
