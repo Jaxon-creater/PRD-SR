@@ -32,7 +32,7 @@ Users must obtain the raw files from the corresponding providers and comply with
 
 ### ☀️Reproducibility scope
 
-The anonymous artifact currently provides **Amazon-beauty only** as the representative end-to-end reproducibility dataset. Amazon-beauty covers the interaction graph, observed friendship graph, business metadata, and review-text inputs required by the model. The remaining experimental datasets are processed from their respective raw sources using the same general protocol, but they are not included in the current reproducibility package.
+The anonymous artifact currently provides **Amazon-beauty example datasets only** as the representative end-to-end reproducibility dataset. Amazon-beauty covers the interaction graph, observed friendship graph, business metadata, and review-text inputs required by the model. The remaining experimental datasets are processed from their respective raw sources using the same general protocol, but they are not included in the current reproducibility package.
 
 The Dataset includes:
 
