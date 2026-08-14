@@ -15,8 +15,8 @@ class DualGraphCollaboration(nn.Module):
     def __init__(self, n_users, n_items, hidden_dim, temperature=0.1,
                  interaction_reliability=None, social_struct_reliability=None,
                  social_shift_penalty=1.0, use_cross_view=True,
-                 reliability_temperature=1.0, residual_weight=0.2,
-                 cross_weight=0.1):
+                 reliability_temperature=1.0, confidence_threshold=0.5,
+                 fallback_slope=10.0):
         """
         Args:
             n_users: Number of users
@@ -29,8 +29,8 @@ class DualGraphCollaboration(nn.Module):
             social_shift_penalty: Penalty strength for diffusion-induced shifts
             use_cross_view: Whether to add lightweight cross-view collaboration
             reliability_temperature: Temperature for reliability softmax gates
-            residual_weight: Weight for preserving original graph representations
-            cross_weight: Strength of cross-view representation
+            confidence_threshold: tau_gamma in the absolute-confidence gate
+            fallback_slope: k_gamma in the absolute-confidence gate
         """
         super(DualGraphCollaboration, self).__init__()
 
@@ -41,8 +41,12 @@ class DualGraphCollaboration(nn.Module):
         self.reliability_temperature = max(reliability_temperature, 1e-6)
         self.social_shift_penalty = social_shift_penalty
         self.use_cross_view = use_cross_view
-        self.residual_weight = min(max(residual_weight, 0.0), 1.0)
-        self.cross_weight = cross_weight
+        self.confidence_threshold = float(confidence_threshold)
+        self.fallback_slope = float(fallback_slope)
+        if not 0.0 <= self.confidence_threshold <= 1.0:
+            raise ValueError("confidence_threshold must be in [0, 1]")
+        if self.fallback_slope <= 0:
+            raise ValueError("fallback_slope must be positive")
 
         interaction_prior = self._make_reliability_prior(interaction_reliability, n_users)
         social_prior = self._make_reliability_prior(social_struct_reliability, n_users)
@@ -130,6 +134,14 @@ class DualGraphCollaboration(nn.Module):
         }
         return weights, stats
 
+    def compute_fallback_gate(self, interaction_reliability, social_reliability):
+        """Eq. (18): turn absolute graph confidence into fallback gate gamma_u."""
+        graph_confidence = torch.maximum(interaction_reliability, social_reliability)
+        fallback_gate = torch.sigmoid(
+            self.fallback_slope * (graph_confidence - self.confidence_threshold)
+        )
+        return graph_confidence, fallback_gate
+
     def compute_distribution_params(self, social_emb, interaction_emb):
         """
         Compute mean and log-variance for distribution alignment.
@@ -174,7 +186,7 @@ class DualGraphCollaboration(nn.Module):
 
         return kl_loss
 
-    def forward(self, user_social_emb, user_interaction_emb, item_emb,
+    def forward(self, user_social_emb, user_interaction_emb, user_id_emb,
                 denoised_social_emb=None, user_indices=None):
         """
         Forward pass for reliability-aware dual-graph collaboration.
@@ -182,19 +194,19 @@ class DualGraphCollaboration(nn.Module):
         Args:
             user_social_emb: Original user social embeddings before denoising
             user_interaction_emb: User interaction embeddings
-            item_emb: Item embeddings, kept for backwards-compatible signature
+            user_id_emb: Non-propagated user ID embedding used by the fallback
             denoised_social_emb: Denoised user social embeddings
             user_indices: Batch user IDs for reliability-prior lookup
 
         Returns:
-            guided_interaction_emb: Reliability-weighted interaction contribution
-            guided_social_emb: Reliability-weighted social contribution
+            rdgc_user_emb: Final two-level RDGC user representation
+            rdgc_social_emb: Social branch contribution g_u^S
             kl_loss: KL divergence alignment loss
         """
         if denoised_social_emb is None:
             denoised_social_emb = user_social_emb
 
-        gate_weights, _ = self.compute_reliability_weights(
+        gate_weights, stats = self.compute_reliability_weights(
             user_social_emb, denoised_social_emb, user_indices
         )
         interaction_weight = gate_weights[:, 0:1]
@@ -202,8 +214,6 @@ class DualGraphCollaboration(nn.Module):
 
         rdgc_interaction = interaction_weight * user_interaction_emb
         rdgc_social = social_weight * denoised_social_emb
-        rdgc_cross = torch.zeros_like(user_interaction_emb)
-
         if self.use_cross_view:
             cross_input = torch.cat([
                 user_interaction_emb,
@@ -212,18 +222,28 @@ class DualGraphCollaboration(nn.Module):
             ], dim=-1)
             cross_emb = self.cross_view_mlp(cross_input)
             cross_weight = interaction_weight * social_weight
-            rdgc_cross = self.cross_weight * cross_weight * cross_emb
+            cross_contribution = cross_weight * cross_emb
+            rdgc_interaction = rdgc_interaction + 0.5 * cross_contribution
+            rdgc_social = rdgc_social + 0.5 * cross_contribution
 
-        residual_scale = self.residual_weight
-        rdgc_scale = 1.0 - residual_scale
-        guided_interaction_emb = residual_scale * user_interaction_emb + \
-            rdgc_scale * (rdgc_interaction + 0.5 * rdgc_cross)
-        guided_social_emb = residual_scale * denoised_social_emb + \
-            rdgc_scale * (rdgc_social + 0.5 * rdgc_cross)
+        graph_candidate = rdgc_interaction + rdgc_social
+        _, fallback_gate = self.compute_fallback_gate(
+            stats["interaction_reliability"], stats["social_reliability"]
+        )
+
+        # Eqs. (19)-(20): normalize both candidates so confidence cannot be
+        # offset by vector magnitude, then fall back to the zero-layer ID
+        # embedding when neither propagated graph view is reliable.
+        normalized_graph = F.normalize(graph_candidate, p=2, dim=-1, eps=1e-8)
+        normalized_id = F.normalize(user_id_emb, p=2, dim=-1, eps=1e-8)
+        rdgc_user_emb = (
+            fallback_gate * normalized_graph
+            + (1.0 - fallback_gate) * normalized_id
+        )
 
         kl_loss = self.compute_kl_divergence_loss(denoised_social_emb, user_interaction_emb)
 
-        return guided_interaction_emb, guided_social_emb, kl_loss
+        return rdgc_user_emb, rdgc_social, kl_loss
 
 
 class MultimodalFeatureFusion(nn.Module):

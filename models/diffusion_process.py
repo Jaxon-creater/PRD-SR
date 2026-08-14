@@ -75,19 +75,19 @@ class DiffusionProcess(nn.Module):
         noise = torch.randn_like(emb_s)
         
         
+        noise_scale_tensor = self._personalized_scale(user_indices, device, batch_size)
         if self.personalized_scheduler is not None and user_indices is not None:
-            noise_scale_tensor = self.personalized_scheduler.get_noise_scale_tensor(user_indices, device)
-           
             noise = noise * noise_scale_tensor
         
         emb_t = self.forward_process(emb_s, ts, noise)
         terms = {}
-        model_output = model(emb_t, ts) 
+        model_output = model(emb_t, ts, noise_scale_tensor)
 
 
         assert model_output.shape == emb_s.shape 
 
         mse = mean_flat((emb_s - model_output) ** 2)
+        loss = mse
 
         if reweight == True:
 
@@ -106,30 +106,27 @@ class DiffusionProcess(nn.Module):
         """Run reverse diffusion from the requested starting timestep."""
         assert steps <= self.steps, "Too much steps in inference."
         if steps == 0:
-            emb_t = emb_s 
+            return emb_s
         else:
             t = torch.tensor([steps - 1] * emb_s.shape[0]).to(emb_s.device)
             emb_t = self.q_sample(emb_s, t, user_indices=user_indices)
 
-        indices = list(range(self.steps))[::-1]
+        noise_scale_tensor = self._personalized_scale(
+            user_indices, emb_s.device, emb_s.shape[0]
+        )
+        indices = list(range(steps - 1, -1, -1))
 
         if self.noise_scale == 0.:
             for i in indices:
                 t = torch.tensor([i] * emb_t.shape[0]).to(emb_s.device)
-                emb_t = model(emb_t, t)
+                emb_t = model(emb_t, t, noise_scale_tensor)
             return emb_t
 
         for i in indices:
             t = torch.tensor([i] * emb_t.shape[0]).to(emb_s.device)
-            out = self.p_mean_variance(model, emb_t, t)
+            out = self.p_mean_variance(model, emb_t, t, noise_scale_tensor)
             if sampling_noise:
                 noise = torch.randn_like(emb_t)
-                
-                
-                if self.personalized_scheduler is not None and user_indices is not None:
-                    noise_scale_tensor = self.personalized_scheduler.get_noise_scale_tensor(user_indices, emb_t.device)
-                    noise = noise * noise_scale_tensor
-                
                 nonzero_mask = (
                     (t != 0).float().view(-1, *([1] * (len(emb_t.shape) - 1)))
                 )  # no noise when t == 0
@@ -137,6 +134,12 @@ class DiffusionProcess(nn.Module):
             else:
                 emb_t = out["mean"]
         return emb_t
+
+    def _personalized_scale(self, user_indices, device, batch_size):
+        """Return xi_u for both SDNet conditioning and personalized variance."""
+        if self.personalized_scheduler is None or user_indices is None:
+            return torch.ones((batch_size, 1), dtype=torch.float32, device=device)
+        return self.personalized_scheduler.get_noise_scale_tensor(user_indices, device)
     
  
        
@@ -213,20 +216,24 @@ class DiffusionProcess(nn.Module):
         )
         return posterior_mean, posterior_variance, posterior_log_variance_clipped
 
-    def p_mean_variance(self, model, x, t):
+    def p_mean_variance(self, model, x, t, noise_scale=None):
         """
         Apply the model to get p(x_{t-1} | x_t), as well as a prediction of
         the initial x, x_0.
         """
         B, C = x.shape[:2]
         assert t.shape == (B,)
-        model_output = model(x, t)
+        model_output = model(x, t, noise_scale)
 
         model_variance = self.posterior_variance
         model_log_variance = self.posterior_log_variance_clipped
 
         model_variance = self._extract_into_tensor(model_variance, t, x.shape)
         model_log_variance = self._extract_into_tensor(model_log_variance, t, x.shape)
+        if noise_scale is not None:
+            scale = noise_scale.to(device=x.device, dtype=x.dtype).view(-1, 1)
+            model_variance = model_variance * scale.pow(2)
+            model_log_variance = model_log_variance + 2.0 * torch.log(scale.clamp_min(1e-12))
         pred_xstart = model_output
 
         model_mean, _, _ = self.q_posterior_mean_variance(emb_s=pred_xstart, emb_t=x, t=t)
@@ -317,5 +324,3 @@ def mean_flat(tensor):
     Take the mean over all non-batch dimensions.
     """
     return tensor.mean(dim=list(range(1, len(tensor.shape))))
-
-# mean_flat(tensor) -> shape = (32,)

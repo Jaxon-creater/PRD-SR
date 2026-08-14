@@ -2,6 +2,17 @@ import os, argparse
 # from yaml import safe_load as yaml_load
 from json import dumps as json_dumps
 
+
+def str2bool(value):
+    if isinstance(value, bool):
+        return value
+    normalized = value.strip().lower()
+    if normalized in {'1', 'true', 'yes', 'on'}:
+        return True
+    if normalized in {'0', 'false', 'no', 'off'}:
+        return False
+    raise argparse.ArgumentTypeError(f"invalid boolean value: {value}")
+
 def parse_args():
     parser = argparse.ArgumentParser(description='SDR Arguments')
     parser.add_argument('--desc', type=str, default='')
@@ -36,11 +47,11 @@ def parse_args():
     parser.add_argument('--test_batch_size', type=int, default=1024)
 
     #Data Arguments
-    parser.add_argument('--dataset',       type=str, default="amazon-beauty")
+    parser.add_argument('--dataset',       type=str, default="amazon")
     parser.add_argument('--num_workers',   type=int, default=0)
     parser.add_argument('--save_name', type=str, default='tem')
-    parser.add_argument('--checkpoint',    type=str, default="./Model/amazon-beauty/_tem_.pth")
-    parser.add_argument('--model_dir',     type=str, default="./Model/amazon-beauty/")
+    parser.add_argument('--checkpoint',    type=str, default="./Model/amazon/_tem_.pth")
+    parser.add_argument('--model_dir',     type=str, default="./Model/amazon/")
    
     # params for the denoiser
     parser.add_argument('--time_type', type=str, default='cat', help='cat or add')
@@ -56,15 +67,19 @@ def parse_args():
     parser.add_argument('--noise_max', type=float, default=0.01, help='noise upper bound for noise generating')
     parser.add_argument('--sampling_noise', type=bool, default=False, help='sampling with noise or not')
     parser.add_argument('--sampling_steps', type=int, default=0, help='steps of the forward process during inference')
-    parser.add_argument('--reweight', type=bool, default=True,
+    parser.add_argument('--reweight', type=str2bool, default=False,
                         help='assign different weight to different timestep or not')
 
     # params for personalized noise scheduling
-    parser.add_argument('--activity_weight', type=float, default=0.8,
+    parser.add_argument('--activity_weight', type=float, default=0.5,
                         help='weight for user activity in personalized noise scheduling')
-    parser.add_argument('--influence_weight', type=float, default=0.2,
+    parser.add_argument('--influence_weight', type=float, default=0.5,
                         help='weight for user influence in personalized noise scheduling')
-    parser.add_argument('--min_noise_scale', type=float, default=0.1,
+    parser.add_argument('--degree_weight', type=float, default=0.6,
+                        help='weight for degree centrality within social influence')
+    parser.add_argument('--pagerank_weight', type=float, default=0.4,
+                        help='weight for PageRank within social influence')
+    parser.add_argument('--min_noise_scale', type=float, default=0.3,
                         help='minimum noise scale for high-activity/high-influence users')
     parser.add_argument('--max_noise_scale', type=float, default=1.0,
                         help='maximum noise scale for low-activity/low-influence users')
@@ -72,6 +87,8 @@ def parse_args():
     # params for semantic features
     parser.add_argument('--semantic_dim', type=int, default=384,
                         help='dimension of semantic features from all-MiniLM-L6-v2')
+    parser.add_argument('--minilm_model_path', type=str, default='models/all-MiniLM-L6-v2',
+                        help='local all-MiniLM-L6-v2 directory; network download is disabled')
     parser.add_argument('--review_text_path', type=str, default='datasets/amazon/review_texts.csv',
                         help='path to review texts CSV file')
     parser.add_argument('--use_semantic', type=bool, default=True,
@@ -81,9 +98,9 @@ def parse_args():
     parser.add_argument('--semantic_fusion_mode', type=str, default='residual',
                         choices=['residual', 'multimodal'],
                         help='how to fuse semantic features: residual preserves RDGC as the main representation')
-    parser.add_argument('--user_semantic_residual_weight', type=float, default=0.5,
+    parser.add_argument('--user_semantic_residual_weight', type=float, default=1.0,
                         help='residual weight for adding projected user text features to RDGC user embeddings')
-    parser.add_argument('--item_semantic_residual_weight', type=float, default=0.5,
+    parser.add_argument('--item_semantic_residual_weight', type=float, default=1.0,
                         help='residual weight for adding projected item text features to item embeddings')
 
     # params for dual-graph collaboration
@@ -97,11 +114,11 @@ def parse_args():
                         help='penalty strength for diffusion-induced social shifts in RDGC')
     parser.add_argument('--rdgc_temp', type=float, default=1.0,
                         help='softmax temperature for RDGC reliability gates')
-    parser.add_argument('--rdgc_residual_weight', type=float, default=0.2,
-                        help='weight for preserving original graph representations in RDGC')
-    parser.add_argument('--rdgc_cross_weight', type=float, default=0.3,
-                        help='strength of cross-view representation in RDGC')
-    parser.add_argument('--rdgc_use_cross_view', type=bool, default=True,
+    parser.add_argument('--rdgc_confidence_threshold', type=float, default=0.5,
+                        help='tau_gamma for the second-level RDGC fallback gate')
+    parser.add_argument('--rdgc_fallback_slope', type=float, default=10.0,
+                        help='k_gamma for the second-level RDGC fallback gate')
+    parser.add_argument('--rdgc_use_cross_view', type=str2bool, default=True,
                         help='whether to use cross-view representation in RDGC')
 
     # params for multimodal fusion
@@ -126,8 +143,6 @@ def parse_args():
 
 args = parse_args()
 
-
-# ciao 5e-3, 1e-3, 1 1e-2, 20, emb_size:16
 
 
 

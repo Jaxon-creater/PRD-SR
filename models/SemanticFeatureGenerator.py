@@ -8,30 +8,52 @@ from tqdm import tqdm
 
 class SemanticFeatureGenerator:
     """
-    Semantic Feature Generator using all-MiniLM-L6-v2 model from Hugging Face.
+    Semantic feature generator using a local all-MiniLM-L6-v2 model.
     Generates 384-dimensional semantic vectors from text data.
     """
 
-    def __init__(self, model_name='sentence-transformers/all-MiniLM-L6-v2', device=None):
+    def __init__(self, model_path='models/all-MiniLM-L6-v2', device=None):
         """
         Args:
-            model_name: The name of the sentence transformer model
+            model_path: Local all-MiniLM-L6-v2 directory. Relative paths are
+                resolved from the code_github project root.
             device: torch device (cuda or cpu)
         """
-        self.model_name = model_name
         self.device = device if device else torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         self.embedding_dim = 384  # all-MiniLM-L6-v2 outputs 384-dim vectors
 
-        # Load the model
+        project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        model_path = os.path.expanduser(model_path)
+        if not os.path.isabs(model_path):
+            model_path = os.path.join(project_root, model_path)
+        self.model_path = os.path.abspath(model_path)
+
+        required_files = ('modules.json', 'config.json')
+        missing_files = [
+            filename for filename in required_files
+            if not os.path.isfile(os.path.join(self.model_path, filename))
+        ]
+        if not os.path.isdir(self.model_path) or missing_files:
+            missing_text = ', '.join(missing_files) if missing_files else 'model directory'
+            raise FileNotFoundError(
+                f"Local MiniLM model is incomplete at {self.model_path}; "
+                f"missing: {missing_text}. Download all-MiniLM-L6-v2 before training."
+            )
+
+        # Enforce local-only loading. This process must never contact the Hub.
+        os.environ['HF_HUB_OFFLINE'] = '1'
+        os.environ['TRANSFORMERS_OFFLINE'] = '1'
         try:
             from sentence_transformers import SentenceTransformer
-            self.model = SentenceTransformer(model_name)
-            self.model = self.model.to(self.device)
-            print(f"[SemanticFeatureGenerator] Loaded model: {model_name}")
-            print(f"[SemanticFeatureGenerator] Embedding dimension: {self.embedding_dim}")
-        except ImportError:
-            print("[Warning] sentence-transformers not installed. Run: pip install sentence-transformers")
-            self.model = None
+        except ImportError as exc:
+            raise RuntimeError(
+                "sentence-transformers is not installed; install requirements.txt before training"
+            ) from exc
+
+        self.model = SentenceTransformer(self.model_path)
+        self.model = self.model.to(self.device)
+        print(f"[SemanticFeatureGenerator] Loaded local model: {self.model_path}")
+        print(f"[SemanticFeatureGenerator] Embedding dimension: {self.embedding_dim}")
 
     def generate_embeddings(self, texts, batch_size=64, show_progress=True):
         """
@@ -45,9 +67,6 @@ class SemanticFeatureGenerator:
         Returns:
             numpy array of shape (n_texts, 384)
         """
-        if self.model is None:
-            raise RuntimeError("Model not loaded. Please install sentence-transformers.")
-
         embeddings = self.model.encode(
             texts,
             batch_size=batch_size,

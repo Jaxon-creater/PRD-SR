@@ -189,6 +189,11 @@ class SDNet(nn.Module):
         self.norm = norm
 
         self.emb_layer = nn.Linear(self.time_emb_dim, self.time_emb_dim)
+        self.scale_emb_layer = nn.Sequential(
+            nn.Linear(1, self.time_emb_dim),
+            nn.SiLU(),
+            nn.Linear(self.time_emb_dim, self.time_emb_dim),
+        )
 
         if self.time_type == "cat":
             in_dims_temp = [self.in_dims[0] + self.time_emb_dim] + self.in_dims[1:]
@@ -234,9 +239,21 @@ class SDNet(nn.Module):
         self.emb_layer.weight.data.normal_(0.0, std)
         self.emb_layer.bias.data.normal_(0.0, 0.001)
 
-    def forward(self, x, timesteps):
+        for layer in self.scale_emb_layer:
+            if isinstance(layer, nn.Linear):
+                size = layer.weight.size()
+                std = np.sqrt(2.0 / (size[0] + size[1]))
+                layer.weight.data.normal_(0.0, std)
+                layer.bias.data.normal_(0.0, 0.001)
+
+    def forward(self, x, timesteps, noise_scale=None):
         time_emb = timestep_embedding(timesteps, self.time_emb_dim).to(x.device)
         emb = self.emb_layer(time_emb)
+        if noise_scale is None:
+            noise_scale = torch.ones((x.size(0), 1), dtype=x.dtype, device=x.device)
+        else:
+            noise_scale = noise_scale.to(device=x.device, dtype=x.dtype).view(-1, 1)
+        emb = emb + self.scale_emb_layer(noise_scale)
         if self.norm:
             x = F.normalize(x)
         x = self.drop(x)

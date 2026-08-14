@@ -45,8 +45,9 @@ class PersonalizedNoiseScheduler:
     Adjust each user's diffusion noise level from activity and influence.
     """
     
-    def __init__(self, n_users, train_mat, trust_mat, 
+    def __init__(self, n_users, train_mat, trust_mat,
                  activity_weight=0.5, influence_weight=0.5,
+                 degree_weight=0.6, pagerank_weight=0.4,
                  min_noise_scale=0.3, max_noise_scale=1.0):
         """
         Args:
@@ -55,14 +56,22 @@ class PersonalizedNoiseScheduler:
             trust_mat: Sparse user-user social matrix.
             activity_weight: Contribution of normalized user activity.
             influence_weight: Contribution of normalized social influence.
+            degree_weight: Contribution of normalized degree centrality.
+            pagerank_weight: Contribution of normalized PageRank.
             min_noise_scale: Noise scale for highly reliable users.
             max_noise_scale: Noise scale for less reliable users.
         """
         self.n_users = n_users
-        self.activity_weight = activity_weight
-        self.influence_weight = influence_weight
+        self.activity_weight, self.influence_weight = self._normalize_weights(
+            activity_weight, influence_weight, "activity/influence"
+        )
+        self.degree_weight, self.pagerank_weight = self._normalize_weights(
+            degree_weight, pagerank_weight, "degree/PageRank"
+        )
         self.min_noise_scale = min_noise_scale
         self.max_noise_scale = max_noise_scale
+        if not 0.0 <= self.min_noise_scale <= self.max_noise_scale:
+            raise ValueError("noise scales must satisfy 0 <= min_noise_scale <= max_noise_scale")
 
         # Normalize sparse formats to avoid SciPy matrix/array API differences.
         train_mat = ensure_csr_matrix(train_mat)
@@ -79,10 +88,20 @@ class PersonalizedNoiseScheduler:
         print(f"  Activity range: [{self.user_activity.min():.4f}, {self.user_activity.max():.4f}]")
         print(f"  Influence range: [{self.user_influence.min():.4f}, {self.user_influence.max():.4f}]")
         print(f"  Noise scale range: [{self.noise_scales.min():.4f}, {self.noise_scales.max():.4f}]")
+
+    @staticmethod
+    def _normalize_weights(first, second, name):
+        """Normalize a non-negative weight pair as required by Eqs. (9)-(11)."""
+        first, second = float(first), float(second)
+        if first < 0 or second < 0 or first + second <= 0:
+            raise ValueError(f"{name} weights must be non-negative and have a positive sum")
+        total = first + second
+        return first / total, second / total
     
     def _calculate_activity(self, train_mat):
         """Compute min-max-normalized interaction counts per user."""
-        activity = np.array(train_mat.sum(axis=1)).flatten()
+        # Eq. (8) counts observed interactions rather than summing values.
+        activity = np.diff(train_mat.indptr).astype(np.float64)
 
         # Normalize activity to [0, 1].
         min_val, max_val = activity.min(), activity.max()
@@ -97,11 +116,13 @@ class PersonalizedNoiseScheduler:
         """Estimate social influence from degree centrality and PageRank."""
         n_users = trust_mat.shape[0]
 
-        # Column and row sums capture incoming and outgoing social degree.
-        out_degree = np.array(trust_mat.sum(axis=0)).flatten()
-        in_degree = np.array(trust_mat.sum(axis=1)).flatten()
-
-        degree_centrality = out_degree + in_degree * 0.5
+        # Eq. (9) uses normalized degree centrality. For a directed graph,
+        # total degree includes both incoming and outgoing social support.
+        binary_trust = trust_mat.copy()
+        binary_trust.data = np.ones_like(binary_trust.data)
+        in_degree = np.diff(binary_trust.tocsc().indptr).astype(np.float64)
+        out_degree = np.diff(binary_trust.indptr).astype(np.float64)
+        degree_centrality = in_degree + out_degree
 
         if degree_centrality.max() > 0:
             degree_centrality = degree_centrality / degree_centrality.max()
@@ -109,16 +130,19 @@ class PersonalizedNoiseScheduler:
         try:
             # Support both current and legacy NetworkX/SciPy APIs.
             if hasattr(nx, 'from_scipy_sparse_array'):
-                G = nx.from_scipy_sparse_array(trust_mat, create_using=nx.DiGraph)
+                G = nx.from_scipy_sparse_array(binary_trust, create_using=nx.DiGraph)
             else:
-                G = nx.from_scipy_sparse_matrix(trust_mat, create_using=nx.DiGraph)
+                G = nx.from_scipy_sparse_matrix(binary_trust, create_using=nx.DiGraph)
             pagerank = nx.pagerank(G, alpha=0.85, max_iter=100, tol=1e-4)
             pagerank_scores = np.array([pagerank.get(i, 0) for i in range(n_users)])
             
             if pagerank_scores.max() > 0:
                 pagerank_scores = pagerank_scores / pagerank_scores.max()
 
-            influence = 0.6 * degree_centrality + 0.4 * pagerank_scores
+            influence = (
+                self.degree_weight * degree_centrality
+                + self.pagerank_weight * pagerank_scores
+            )
         except Exception:
             # Fall back to degree centrality when PageRank does not converge.
             influence = degree_centrality
@@ -134,14 +158,16 @@ class PersonalizedNoiseScheduler:
         reliable users receive higher noise.
         """
         # Combine the two normalized reliability signals.
-        combined_score = (self.activity_weight * self.user_activity + 
-                         self.influence_weight * self.user_influence)
+        combined_score = (
+            self.activity_weight * self.user_activity
+            + self.influence_weight * self.user_influence
+        )
         
         # Invert reliability so that higher scores produce lower noise.
         noise_scales = self.max_noise_scale - (combined_score * 
                                                (self.max_noise_scale - self.min_noise_scale))
         
-        return noise_scales
+        return np.clip(noise_scales, self.min_noise_scale, self.max_noise_scale)
     
     def get_noise_scale(self, user_indices):
         """

@@ -41,6 +41,8 @@ class Coach:
             trust_mat=self.handler.dataset['trust'],
             activity_weight=args.activity_weight if hasattr(args, 'activity_weight') else 0.5,
             influence_weight=args.influence_weight if hasattr(args, 'influence_weight') else 0.5,
+            degree_weight=getattr(args, 'degree_weight', 0.6),
+            pagerank_weight=getattr(args, 'pagerank_weight', 0.4),
             min_noise_scale=args.min_noise_scale if hasattr(args, 'min_noise_scale') else 0.3,
             max_noise_scale=args.max_noise_scale if hasattr(args, 'max_noise_scale') else 1.0
         )
@@ -104,8 +106,8 @@ class Coach:
                 social_shift_penalty=getattr(args, 'rdgc_social_shift_penalty', 1.0),
                 use_cross_view=getattr(args, 'rdgc_use_cross_view', True),
                 reliability_temperature=getattr(args, 'rdgc_temp', 1.0),
-                residual_weight=getattr(args, 'rdgc_residual_weight', 0.2),
-                cross_weight=getattr(args, 'rdgc_cross_weight', 0.1)
+                confidence_threshold=getattr(args, 'rdgc_confidence_threshold', 0.5),
+                fallback_slope=getattr(args, 'rdgc_fallback_slope', 10.0)
             ).to(self.device)
         else:
             self.dual_graph_collab = None
@@ -167,7 +169,12 @@ class Coach:
             if os.path.exists(review_text_path):
                 print(f"[Coach] Generating semantic features from {review_text_path}...")
                 try:
-                    semantic_generator = SemanticFeatureGenerator(device=self.device)
+                    semantic_generator = SemanticFeatureGenerator(
+                        model_path=getattr(
+                            args, 'minilm_model_path', 'models/all-MiniLM-L6-v2'
+                        ),
+                        device=self.device
+                    )
                     self.user_semantic_features, self.item_semantic_features = \
                         semantic_generator.load_and_process_reviews(
                             review_text_path, self.n_user, self.n_item
@@ -183,21 +190,12 @@ class Coach:
                     torch.save(self.item_semantic_features.cpu(), cache_path_item)
                     print(f"[Coach] Cached semantic features to {semantic_cache_dir}")
                 except Exception as e:
-                    print(f"[Warning] Failed to generate semantic features: {e}")
-                    print("[Warning] Using random semantic features as fallback...")
-                    self._use_random_semantic_features()
+                    raise RuntimeError(
+                        "Failed to generate semantic features from the local MiniLM model. "
+                        "Verify --minilm_model_path and the review CSV."
+                    ) from e
             else:
-                print(f"[Warning] Review text file not found: {review_text_path}")
-                print("[Warning] Using random semantic features as fallback...")
-                self._use_random_semantic_features()
-
-    def _use_random_semantic_features(self):
-        """Use random semantic features as fallback."""
-        semantic_dim = getattr(args, 'semantic_dim', 384)
-        self.user_semantic_features = torch.randn(self.n_user, semantic_dim).to(self.device)
-        self.item_semantic_features = torch.randn(self.n_item, semantic_dim).to(self.device)
-        print(f"[Coach] Created random user semantic features: {self.user_semantic_features.shape}")
-        print(f"[Coach] Created random item semantic features: {self.item_semantic_features.shape}")
+                raise FileNotFoundError(f"Review text file not found: {review_text_path}")
 
     def _setup_optimizers(self):
         """Setup optimizers for all trainable modules."""
@@ -378,26 +376,25 @@ class Coach:
             # ========== Step 3: Dual-Graph Collaboration ==========
             kl_loss = torch.tensor(0.0, device=self.device)
             if self.use_dual_graph and self.dual_graph_collab is not None:
-                guided_interaction, guided_social, kl_loss = self.dual_graph_collab(
+                user_rdgc, rdgc_social, kl_loss = self.dual_graph_collab(
                     user_social,
                     user_interaction,
-                    iEmbeds,
+                    self.GCNModel.embedding_dict['user_emb'][user_idx],
                     denoised_social_emb=denoised_social,
                     user_indices=user_idx
                 )
-                # Use guided embeddings
-                user_interaction = guided_interaction
-                denoised_social = guided_social
+            else:
+                user_rdgc = user_interaction + denoised_social
+                rdgc_social = denoised_social
 
             # ========== Step 4: Semantic Feature Processing and Fusion ==========
-            user_rdgc = user_interaction + denoised_social
             user_semantic_proj = None
             if self.semantic_fusion_mode == 'multimodal' and self.multimodal_fusion is not None and self._semantic_enabled():
                 user_semantic = self.user_semantic_features[user_idx]
                 user_semantic_proj = self.user_semantic_projection(user_semantic)
                 user_fused, modality_weights = self.multimodal_fusion(
                     semantic_feat=user_semantic_proj,
-                    social_feat=denoised_social,
+                    social_feat=rdgc_social,
                     interaction_feat=user_interaction,
                     base_feat=user_interaction
                 )
@@ -415,7 +412,7 @@ class Coach:
             if self.use_contrastive and self.contrastive_learning is not None:
                 # Task A: Diffusion-Aware Contrastive Learning
                 cl_diff_loss = self.contrastive_learning.diffusion_aware_contrastive_loss(
-                    noisy_social, denoised_social
+                    noisy_social, rdgc_social
                 )
 
                 # Task B: Cross-modal Contrastive Learning (if semantic features available)
@@ -534,24 +531,24 @@ class Coach:
 
                 # Dual-graph collaboration
                 if self.use_dual_graph and self.dual_graph_collab is not None:
-                    guided_interaction, guided_social, _ = self.dual_graph_collab(
+                    user_rdgc, rdgc_social, _ = self.dual_graph_collab(
                         user_social,
                         user_interaction,
-                        iEmbeds,
+                        self.GCNModel.embedding_dict['user_emb'][user_idx],
                         denoised_social_emb=denoised_social,
                         user_indices=user_idx
                     )
-                    user_interaction = guided_interaction
-                    denoised_social = guided_social
+                else:
+                    user_rdgc = user_interaction + denoised_social
+                    rdgc_social = denoised_social
 
                 # Semantic feature processing and fusion
-                user_rdgc = user_interaction + denoised_social
                 if self.semantic_fusion_mode == 'multimodal' and self.multimodal_fusion is not None and self._semantic_enabled():
                     user_semantic = self.user_semantic_features[user_idx]
                     user_semantic_proj = self.user_semantic_projection(user_semantic)
                     user_fused, _ = self.multimodal_fusion(
                         semantic_feat=user_semantic_proj,
-                        social_feat=denoised_social,
+                        social_feat=rdgc_social,
                         interaction_feat=user_interaction,
                         base_feat=user_interaction
                     )

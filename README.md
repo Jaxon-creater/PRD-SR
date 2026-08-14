@@ -41,6 +41,36 @@ datasets/amazon-beauty/dataset.pkl
 datasets/amazon-beauty/review_texts.csv
 ```
 
+### ☀️MiniLM prerequisite
+
+Before the first run, download `sentence-transformers/all-MiniLM-L6-v2`
+manually and place the complete model directory at:
+
+```text
+models/all-MiniLM-L6-v2/
+```
+
+The directory must contain files such as `modules.json`, `config.json`, the
+tokenizer files, and the model weights. On a machine that can access Hugging
+Face, it can be prepared with:
+
+```bash
+huggingface-cli download sentence-transformers/all-MiniLM-L6-v2 \
+  --local-dir models/all-MiniLM-L6-v2
+```
+
+For an offline training server, download the directory elsewhere and upload
+the complete directory to the path above. The training code loads MiniLM from
+local storage only and never downloads it automatically. A different local
+directory can be selected with:
+
+```bash
+python main.py --minilm_model_path /absolute/path/to/all-MiniLM-L6-v2
+```
+
+If the model directory is missing or incomplete, training stops with an
+explicit error instead of silently replacing text features with random data.
+
 ## 🚀Model Training
 
 ### 🔥Train on Dataset

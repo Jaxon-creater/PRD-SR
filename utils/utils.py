@@ -1,7 +1,5 @@
 import torch, os, pickle, random
 import numpy as np
-# from yaml import safe_load as yaml_load
-# from json import dumps as json_dumps
 
 
 def load_data(data_path):
