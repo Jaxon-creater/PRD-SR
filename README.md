@@ -1,6 +1,6 @@
-# Reliability-Aware Dual-Graph Diffusion for Robust Social Recommendation
+# Reliability-Aware Dual-Graph Diffusion for Robust Social Recommendation(WSDM2027)
 
-This anonymous repository contains the implementation and a representative end-to-end reproducibility pipeline for the proposed method.
+This repository contains the implementation and a representative end-to-end reproducibility pipeline for the proposed method.
 
 ##  ⚙️Environment
 
